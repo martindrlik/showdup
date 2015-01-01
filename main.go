@@ -5,13 +5,13 @@ import (
 	"crypto/md5"
 	"flag"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
 )
 
-var sums = make(map[[16]byte]map[string]struct{})
+var sums = make(map[[md5.Size]byte]map[string]struct{})
 
 func main() {
 	flag.Parse()
@@ -66,12 +66,21 @@ func walkFn(path string, info os.FileInfo, err error) error {
 	if info.IsDir() {
 		return nil
 	}
-	d, err := ioutil.ReadFile(path)
+	h := md5.New()
+	f, err := os.Open(path)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s\n", err)
 		return nil
 	}
-	s := md5.Sum(d)
+	defer f.Close()
+	if _, err := io.Copy(h, f); err != nil {
+		fmt.Fprintf(os.Stderr, "%s\n", err)
+		return nil
+	}
+	s := [md5.Size]byte{}
+	for i, b := range h.Sum(nil) {
+		s[i] = b
+	}
 	paths, ok := sums[s]
 	if !ok {
 		paths = make(map[string]struct{})
