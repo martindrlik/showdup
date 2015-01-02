@@ -52,13 +52,15 @@ func main() {
 			fmt.Fprintf(os.Stderr, "%s\n", err)
 		}
 	}
-	for _, paths := range sizes {
+	for size, paths := range sizes {
 		if len(paths) < 2 {
 			continue
 		}
 		for _, p := range paths {
-			if s, ok := sumN(p, 512); ok {
-				sums1[s] = append(sums1[s], p)
+			if size > 512 {
+				sumN(p, 512)
+			} else {
+				sumN(p, -1)
 			}
 		}
 	}
@@ -67,12 +69,13 @@ func main() {
 			continue
 		}
 		for _, p := range paths {
-			if s, ok := sumN(p, -1); ok {
-				sums2[s] = append(sums2[s], p)
-			}
+			sumN(p, -1)
 		}
 	}
 	for _, paths := range sums2 {
+		if len(paths) < 2 {
+			continue
+		}
 		for _, p := range paths {
 			fmt.Printf("%s\n", p)
 		}
@@ -92,13 +95,12 @@ func walkFn(path string, info os.FileInfo, err error) error {
 	return nil
 }
 
-func sumN(path string, n int64) ([16]byte, bool) {
-	s := [md5.Size]byte{}
+func sumN(path string, n int64) {
 	h := md5.New()
 	f, err := os.Open(path)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s\n", err)
-		return s, false
+		return
 	}
 	defer f.Close()
 	if n > 0 {
@@ -108,10 +110,15 @@ func sumN(path string, n int64) ([16]byte, bool) {
 	}
 	if err != nil && err != io.EOF {
 		fmt.Fprintf(os.Stderr, "%s\n", err)
-		return s, false
+		return
 	}
+	s := [md5.Size]byte{}
 	for i, b := range h.Sum(nil) {
 		s[i] = b
 	}
-	return s, true
+	if n > 0 {
+		sums1[s] = append(sums1[s], path)
+	} else {
+		sums2[s] = append(sums2[s], path)
+	}
 }
