@@ -18,13 +18,18 @@ var (
 
 func main() {
 	flag.Parse()
+	args := make(map[string]string)
 	for i := 0; i < flag.NArg(); i++ {
 		matches, err := filepath.Glob(flag.Arg(i))
 		if err != nil {
 			log.Fatal(err)
 		}
 		for _, m := range matches {
-			collect(m)
+			abs, err := filepath.Abs(m)
+			if err != nil {
+				log.Fatal(err)
+			}
+			args[abs] = m
 		}
 	}
 	if flag.NArg() == 0 {
@@ -32,7 +37,10 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		collect(dir)
+		args[dir] = dir
+	}
+	for _, arg := range args {
+		collect(arg)
 	}
 	for _, paths := range sizes {
 		if len(paths) < 2 {
