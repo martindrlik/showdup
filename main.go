@@ -13,13 +13,12 @@ import (
 
 var (
 	sizes = make(map[int64][]string)
-	sums1 = make(map[[md5.Size]byte][]string)
-	sums2 = make(map[[md5.Size]byte][]string)
+	sums  = make(map[[md5.Size]byte]map[string]struct{})
 )
 
 func main() {
 	flag.Parse()
-	paths := make(map[string]string)
+	args := make(map[string]string)
 	for i := 0; i < flag.NArg(); i++ {
 		matches, err := filepath.Glob(flag.Arg(i))
 		if err != nil {
@@ -30,7 +29,7 @@ func main() {
 			if err != nil {
 				log.Fatal(err)
 			}
-			paths[abs] = m
+			args[abs] = m
 		}
 	}
 	if flag.NArg() == 0 {
@@ -38,45 +37,43 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		paths[dir] = dir
+		args[dir] = dir
 	}
-	for _, p := range paths {
-		info, err := os.Stat(p)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "%s\n", err)
-		} else if !info.IsDir() {
-			if err := walkFn(p, info, err); err != nil {
-				fmt.Fprintf(os.Stderr, "%s\n", err)
-			}
-		} else if err := filepath.Walk(p, walkFn); err != nil {
-			fmt.Fprintf(os.Stderr, "%s\n", err)
-		}
+	for _, arg := range args {
+		collect(arg)
 	}
 	for _, paths := range sizes {
 		if len(paths) < 2 {
 			continue
 		}
 		for _, p := range paths {
-			if s, ok := sumN(p, 512); ok {
-				sums1[s] = append(sums1[s], p)
-			}
+			sum(p)
 		}
 	}
-	for _, paths := range sums1 {
-		if len(paths) < 2 {
-			continue
-		}
-		for _, p := range paths {
-			if s, ok := sumN(p, -1); ok {
-				sums2[s] = append(sums2[s], p)
+	for _, paths := range sums {
+		if len(paths) > 1 {
+			for p := range paths {
+				fmt.Printf("%s\n", p)
 			}
+			fmt.Printf("\n")
 		}
 	}
-	for _, paths := range sums2 {
-		for _, p := range paths {
-			fmt.Printf("%s\n", p)
+}
+
+func collect(path string) {
+	info, err := os.Stat(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%s\n", err)
+		return
+	}
+	if !info.IsDir() {
+		if err := walkFn(path, info, err); err != nil {
+			fmt.Fprintf(os.Stderr, "%s\n", err)
 		}
-		fmt.Printf("\n")
+		return
+	}
+	if err := filepath.Walk(path, walkFn); err != nil {
+		fmt.Fprintf(os.Stderr, "%s\n", err)
 	}
 }
 
@@ -92,26 +89,26 @@ func walkFn(path string, info os.FileInfo, err error) error {
 	return nil
 }
 
-func sumN(path string, n int64) ([16]byte, bool) {
-	s := [md5.Size]byte{}
+func sum(path string) {
 	h := md5.New()
 	f, err := os.Open(path)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s\n", err)
-		return s, false
+		return
 	}
 	defer f.Close()
-	if n > 0 {
-		_, err = io.CopyN(h, f, n)
-	} else {
-		_, err = io.Copy(h, f)
-	}
-	if err != nil {
+	if _, err := io.Copy(h, f); err != nil {
 		fmt.Fprintf(os.Stderr, "%s\n", err)
-		return s, false
+		return
 	}
+	s := [md5.Size]byte{}
 	for i, b := range h.Sum(nil) {
 		s[i] = b
 	}
-	return s, true
+	paths, ok := sums[s]
+	if !ok {
+		paths = make(map[string]struct{})
+		sums[s] = paths
+	}
+	paths[path] = struct{}{}
 }
