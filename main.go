@@ -106,7 +106,7 @@ func sumN(path string, n int64) ([16]byte, bool) {
 	} else {
 		_, err = io.Copy(h, f)
 	}
-	if err != nil {
+	if err != nil && err != io.EOF {
 		fmt.Fprintf(os.Stderr, "%s\n", err)
 		return s, false
 	}
