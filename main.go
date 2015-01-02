@@ -1,4 +1,4 @@
-// Command shows file duplicity.
+// Command shows file duplication.
 package main
 
 import (
