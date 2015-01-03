@@ -9,16 +9,27 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime/pprof"
 )
 
 var (
 	sizes = make(map[int64][]string)
 	sums1 = make(map[[md5.Size]byte][]string)
 	sums2 = make(map[[md5.Size]byte][]string)
+
+	cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
 )
 
 func main() {
 	flag.Parse()
+	if *cpuprofile != "" {
+		f, err := os.Create(*cpuprofile)
+		if err != nil {
+			log.Fatal(err)
+		}
+		pprof.StartCPUProfile(f)
+		defer pprof.StopCPUProfile()
+	}
 	paths := make(map[string]string)
 	for i := 0; i < flag.NArg(); i++ {
 		matches, err := filepath.Glob(flag.Arg(i))
