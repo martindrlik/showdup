@@ -16,6 +16,7 @@ var (
 	sizes = make(map[int64][]string)
 
 	cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
+	first      = flag.Int64("first", 0, "use only first N bytes")
 )
 
 func main() {
@@ -65,7 +66,9 @@ func main() {
 		if len(paths) < 2 {
 			continue
 		}
-		if size > 512 {
+		if *first > 0 {
+			print(sumAll(paths, *first))
+		} else if size > 512 {
 			for _, paths := range sumAll(paths, 512) {
 				if len(paths) > 1 {
 					print(sumAll(paths, 0))
@@ -126,7 +129,11 @@ func print(m map[[md5.Size]byte][]string) {
 	for _, paths := range m {
 		if len(paths) > 1 {
 			for _, p := range paths {
-				fmt.Printf("%s\n", p)
+				if *first > 0 {
+					fmt.Printf("(first %d) %s\n", *first, p)
+				} else {
+					fmt.Printf("%s\n", p)
+				}
 			}
 			fmt.Print("\n")
 		}
