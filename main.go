@@ -14,8 +14,6 @@ import (
 
 var (
 	sizes = make(map[int64][]string)
-	sums1 = make(map[[md5.Size]byte][]string)
-	sums2 = make(map[[md5.Size]byte][]string)
 
 	cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
 )
@@ -67,30 +65,15 @@ func main() {
 		if len(paths) < 2 {
 			continue
 		}
-		for _, p := range paths {
-			if size > 512 {
-				sumN(p, 512)
-			} else {
-				sumN(p, -1)
+		if size > 512 {
+			for _, paths := range sumAll(paths, 512) {
+				if len(paths) > 1 {
+					print(sumAll(paths, 0))
+				}
 			}
+		} else {
+			print(sumAll(paths, 0))
 		}
-	}
-	for _, paths := range sums1 {
-		if len(paths) < 2 {
-			continue
-		}
-		for _, p := range paths {
-			sumN(p, -1)
-		}
-	}
-	for _, paths := range sums2 {
-		if len(paths) < 2 {
-			continue
-		}
-		for _, p := range paths {
-			fmt.Printf("%s\n", p)
-		}
-		fmt.Printf("\n")
 	}
 }
 
@@ -106,12 +89,22 @@ func walkFn(path string, info os.FileInfo, err error) error {
 	return nil
 }
 
-func sumN(path string, n int64) {
+func sumAll(paths []string, n int64) map[[md5.Size]byte][]string {
+	sum := make(map[[md5.Size]byte][]string)
+	for _, p := range paths {
+		if s, ok := sumN(p, n); ok {
+			sum[s] = append(sum[s], p)
+		}
+	}
+	return sum
+}
+
+func sumN(path string, n int64) (s [md5.Size]byte, ok bool) {
 	h := md5.New()
 	f, err := os.Open(path)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s\n", err)
-		return
+		return s, false
 	}
 	defer f.Close()
 	if n > 0 {
@@ -121,15 +114,21 @@ func sumN(path string, n int64) {
 	}
 	if err != nil && err != io.EOF {
 		fmt.Fprintf(os.Stderr, "%s\n", err)
-		return
+		return s, false
 	}
-	s := [md5.Size]byte{}
 	for i, b := range h.Sum(nil) {
 		s[i] = b
 	}
-	if n > 0 {
-		sums1[s] = append(sums1[s], path)
-	} else {
-		sums2[s] = append(sums2[s], path)
+	return s, true
+}
+
+func print(m map[[md5.Size]byte][]string) {
+	for _, paths := range m {
+		if len(paths) > 1 {
+			for _, p := range paths {
+				fmt.Printf("%s\n", p)
+			}
+			fmt.Print("\n")
+		}
 	}
 }
