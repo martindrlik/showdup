@@ -24,3 +24,9 @@ Specify path by passing arguments:
 	$ $GOPATH/bin/showdup ./*.jpg /second/path
 
 The argument can be pattern. The pattern syntax is defined [here](http://golang.org/pkg/path/filepath/#Match).
+
+## Command options
+
+`-first=N`: use only first N bytes
+
+To find out that two files are identical you must read all bytes. It's practical to read only first N bytes and show that files are identical in first N bytes.
