@@ -1,6 +1,6 @@
 # Showdup
 
-Showdup is command to show file duplication.
+Showdup is command to show identical files.
 
 
 ## Installation
@@ -15,7 +15,7 @@ Second, download (or update) and build Showdup:
 
 ## Usage
 
-Run the `showdup` binary to show file duplication of the current directory:
+Run the `showdup` binary to show identical files in the current directory:
 
 	$ $GOPATH/bin/showdup
 
