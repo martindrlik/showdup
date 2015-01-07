@@ -20,6 +20,7 @@ var (
 )
 
 func main() {
+	flag.Usage = usage
 	flag.Parse()
 	if *cpuprofile != "" {
 		f, err := os.Create(*cpuprofile)
@@ -138,4 +139,11 @@ func print(m map[[md5.Size]byte][]string) {
 			fmt.Print("\n")
 		}
 	}
+}
+
+func usage() {
+	fmt.Fprintf(os.Stderr, "usage: showdup [options] [file ...]\n")
+	fmt.Fprintf(os.Stderr, "Flags:\n")
+	flag.PrintDefaults()
+	os.Exit(2)
 }
