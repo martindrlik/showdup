@@ -1,6 +1,6 @@
 # Showdup
 
-Showdup is command to show identical files.
+Command showdup shows files which are probably identical.
 
 
 ## Installation
@@ -27,6 +27,5 @@ The argument can be pattern. The pattern syntax is defined [here](http://golang.
 
 ## Command options
 
-`-first=N`: use only first N bytes
-
-To find out that two files are identical you must read all bytes. It's practical to read only first N bytes and show that files are identical in first N bytes.
+`first=512`: read only first 512 bytes
+`immediate=false`: print immediately; no order, but "hash:" prefix

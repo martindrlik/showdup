@@ -1,4 +1,5 @@
-// Command shows identical files.
+// Command showdup shows files which are probably identical.
+//
 package main
 
 import (
@@ -8,15 +9,14 @@ import (
 	"io"
 	"log"
 	"os"
-	"path/filepath"
+	"path"
 	"runtime/pprof"
 )
 
 var (
-	sizes = make(map[int64][]string)
-
 	cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
-	first      = flag.Int64("first", 0, "use only first N bytes")
+	first      = flag.Int64("first", 512, "read only first 512 bytes")
+	immediate  = flag.Bool("immediate", false, "print immediately; no order, but \"hash:\" prefix")
 )
 
 func main() {
@@ -30,115 +30,128 @@ func main() {
 		pprof.StartCPUProfile(f)
 		defer pprof.StopCPUProfile()
 	}
-	paths := make(map[string]string)
-	for i := 0; i < flag.NArg(); i++ {
-		matches, err := filepath.Glob(flag.Arg(i))
-		if err != nil {
-			log.Fatal(err)
+	ch := make(chan File)
+	go func() {
+		if flag.NArg() == 0 {
+			readFile(".", ch)
 		}
-		for _, m := range matches {
-			abs, err := filepath.Abs(m)
-			if err != nil {
-				log.Fatal(err)
-			}
-			paths[abs] = m
+		for i := 0; i < flag.NArg(); i++ {
+			readFile(flag.Arg(i), ch)
 		}
-	}
-	if flag.NArg() == 0 {
-		dir, err := os.Getwd()
-		if err != nil {
-			log.Fatal(err)
-		}
-		paths[dir] = dir
-	}
-	for _, p := range paths {
-		info, err := os.Stat(p)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "%s\n", err)
-		} else if !info.IsDir() {
-			if err := walkFn(p, info, err); err != nil {
-				fmt.Fprintf(os.Stderr, "%s\n", err)
-			}
-		} else if err := filepath.Walk(p, walkFn); err != nil {
-			fmt.Fprintf(os.Stderr, "%s\n", err)
-		}
-	}
-	for size, paths := range sizes {
-		if len(paths) < 2 {
+		close(ch)
+	}()
+	byHash := make(map[string][]string)
+	for file := range ch {
+		if file.err != nil {
+			fmt.Fprintf(os.Stderr, "%v\n", file.err)
 			continue
 		}
-		if *first > 0 {
-			print(sumAll(paths, *first))
-		} else if size > 512 {
-			for _, paths := range sumAll(paths, 512) {
-				if len(paths) > 1 {
-					print(sumAll(paths, 0))
-				}
+		files := append(byHash[file.hash], file.name)
+		byHash[file.hash] = files
+		if !*immediate {
+			continue
+		}
+		switch len(files) {
+		case 1:
+		case 2:
+			for _, name := range files {
+				fmt.Fprintf(os.Stdout, "%v:%v\n", file.hash, name)
 			}
-		} else {
-			print(sumAll(paths, 0))
+		default:
+			fmt.Fprintf(os.Stdout, "%v:%v\n", file.hash, file.name)
 		}
 	}
-}
-
-func walkFn(path string, info os.FileInfo, err error) error {
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s\n", err)
-		return nil
+	if *immediate {
+		return
 	}
-	if info.IsDir() {
-		return nil
-	}
-	sizes[info.Size()] = append(sizes[info.Size()], path)
-	return nil
-}
-
-func sumAll(paths []string, n int64) map[[md5.Size]byte][]string {
-	sum := make(map[[md5.Size]byte][]string)
-	for _, p := range paths {
-		if s, ok := sumN(p, n); ok {
-			sum[s] = append(sum[s], p)
+	for _, files := range byHash {
+		for _, name := range files {
+			fmt.Fprintf(os.Stdout, "%v\n", name)
 		}
+		fmt.Fprintf(os.Stdout, "\n")
 	}
-	return sum
 }
 
-func sumN(path string, n int64) (s [md5.Size]byte, ok bool) {
-	h := md5.New()
-	f, err := os.Open(path)
+type File struct {
+	err  error
+	hash string
+	name string
+}
+
+var bySize = make(map[int64][]string)
+
+func readFile(name string, ch chan<- File) {
+	f, err := os.Open(name)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s\n", err)
-		return s, false
+		ch <- File{err: err}
+		return
 	}
 	defer f.Close()
-	if n > 0 {
-		_, err = io.CopyN(h, f, n)
-	} else {
-		_, err = io.Copy(h, f)
+	fi, err := f.Stat()
+	if err != nil {
+		ch <- File{err: err}
+		return
 	}
-	if err != nil && err != io.EOF {
-		fmt.Fprintf(os.Stderr, "%s\n", err)
-		return s, false
+	if fi.IsDir() {
+		readDir(name, f, ch)
+		return
 	}
-	for i, b := range h.Sum(nil) {
-		s[i] = b
+	size := fi.Size()
+	files, ok := bySize[size]
+	if !ok {
+		bySize[size] = []string{name}
+		return
 	}
-	return s, true
+	ch0 := make(chan File)
+	if len(files) > 1 {
+		go hash(name, f, ch0)
+		ch <- <-ch0
+		return
+	}
+	bySize[size] = append(files, name)
+	go hash(name, f, ch0)
+	go hash(files[0], nil, ch0)
+	ch <- <-ch0
+	ch <- <-ch0
 }
 
-func print(m map[[md5.Size]byte][]string) {
-	for _, paths := range m {
-		if len(paths) > 1 {
-			for _, p := range paths {
-				if *first > 0 {
-					fmt.Printf("(first %d) %s\n", *first, p)
-				} else {
-					fmt.Printf("%s\n", p)
-				}
-			}
-			fmt.Print("\n")
+func hash(name string, r io.Reader, ch chan<- File) {
+	if r == nil {
+		f, err := os.Open(name)
+		if err != nil {
+			ch <- File{err: err}
+			return
 		}
+		defer f.Close()
+		r = f
 	}
+	if *first < 0 || *first > 8*512 {
+		*first = 512
+	}
+	b := make([]byte, *first)
+	n, err := r.Read(b)
+	if err != nil && err != io.EOF {
+		ch <- File{err: err}
+		return
+	}
+	hash := fmt.Sprintf("%x", md5.Sum(b[:n]))
+	ch <- File{name: name, hash: hash}
+}
+
+func readDir(dir string, f *os.File, ch chan<- File) {
+repeat:
+	names, err := f.Readdirnames(64)
+	if err != nil && err != io.EOF {
+		ch <- File{err: err}
+		return
+	}
+	for _, name := range names {
+		readFile(path.Join(dir, name), ch)
+	}
+	if err == io.EOF {
+		return
+	}
+	goto repeat
 }
 
 func usage() {
