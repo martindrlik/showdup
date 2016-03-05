@@ -1,162 +1,121 @@
-// Command showdup shows files which are probably identical.
-//
+// showdup displays identical files in specified directories.
+// usage: showdup [directory...]
+
 package main
 
 import (
 	"crypto/md5"
-	"flag"
 	"fmt"
 	"io"
-	"log"
+	"io/ioutil"
 	"os"
 	"path"
-	"runtime/pprof"
 )
 
+const FirstNBytes = 128
+
 var (
-	cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
-	first      = flag.Int64("first", 512, "read only first 512 bytes")
-	immediate  = flag.Bool("immediate", false, "print immediately; no order, but \"hash:\" prefix")
+	size = make(map[int64][]string)
 )
 
 func main() {
-	flag.Usage = usage
-	flag.Parse()
-	if *cpuprofile != "" {
-		f, err := os.Create(*cpuprofile)
-		if err != nil {
-			log.Fatal(err)
-		}
-		pprof.StartCPUProfile(f)
-		defer pprof.StopCPUProfile()
+	if len(os.Args) <= 1 {
+		readDir(".")
 	}
-	ch := make(chan File)
-	go func() {
-		if flag.NArg() == 0 {
-			readFile(".", ch)
-		}
-		for i := 0; i < flag.NArg(); i++ {
-			readFile(flag.Arg(i), ch)
-		}
-		close(ch)
-	}()
-	byHash := make(map[string][]string)
-	for file := range ch {
-		if file.err != nil {
-			fmt.Fprintf(os.Stderr, "%v\n", file.err)
+	for i := 1; i < len(os.Args); i++ {
+		readDir(os.Args[i])
+	}
+	for _, same := range size {
+		if len(same) < 2 {
 			continue
 		}
-		files := append(byHash[file.hash], file.name)
-		byHash[file.hash] = files
-		if !*immediate {
-			continue
-		}
-		switch len(files) {
-		case 1:
-		case 2:
-			for _, name := range files {
-				fmt.Fprintf(os.Stdout, "%v:%v\n", file.hash, name)
-			}
-		default:
-			fmt.Fprintf(os.Stdout, "%v:%v\n", file.hash, file.name)
-		}
-	}
-	if *immediate {
-		return
-	}
-	for _, files := range byHash {
-		for _, name := range files {
-			fmt.Fprintf(os.Stdout, "%v\n", name)
-		}
-		fmt.Fprintf(os.Stdout, "\n")
+		readFiles(same)
 	}
 }
 
-type File struct {
-	err  error
-	hash string
-	name string
-}
-
-var bySize = make(map[int64][]string)
-
-func readFile(name string, ch chan<- File) {
-	f, err := os.Open(name)
-	if err != nil {
-		ch <- File{err: err}
+// readDir groups files in dir by file size.
+func readDir(dir string) {
+	f, err := os.Open(dir)
+	if check(err, dir) {
 		return
 	}
 	defer f.Close()
-	fi, err := f.Stat()
-	if err != nil {
-		ch <- File{err: err}
-		return
+	for {
+		fis, err := f.Readdir(100)
+		if err != io.EOF && check(err, dir) {
+			break
+		}
+		for _, fi := range fis {
+			if fi.IsDir() {
+				continue
+			}
+			s := fi.Size()
+			name := path.Join(dir, fi.Name())
+			size[s] = append(size[s], name)
+		}
+		if err == io.EOF {
+			break
+		}
 	}
-	if fi.IsDir() {
-		readDir(name, f, ch)
-		return
-	}
-	size := fi.Size()
-	files, ok := bySize[size]
-	if !ok {
-		bySize[size] = []string{name}
-		return
-	}
-	ch0 := make(chan File)
-	if len(files) > 1 {
-		go hash(name, f, ch0)
-		ch <- <-ch0
-		return
-	}
-	bySize[size] = append(files, name)
-	go hash(name, f, ch0)
-	go hash(files[0], nil, ch0)
-	ch <- <-ch0
-	ch <- <-ch0
 }
 
-func hash(name string, r io.Reader, ch chan<- File) {
-	if r == nil {
+// readFiles prints identical files. It groups files by first n bytes given by
+// FirstNBytes then if there is multiple with the same first n bytes it
+// continues to test these files and eventually prints if files are identical.
+func readFiles(files []string) {
+	type First [FirstNBytes]byte
+	first := make(map[First][]string)
+	readFirst := func(name string) {
 		f, err := os.Open(name)
-		if err != nil {
-			ch <- File{err: err}
+		if check(err, name) {
 			return
 		}
 		defer f.Close()
-		r = f
+		var b First
+		_, err = f.Read(b[:]) // b[:] is hack to better avoid in code that matters
+		if check(err, name) {
+			return
+		}
+		first[b] = append(first[b], name)
 	}
-	if *first < 0 || *first > 8*512 {
-		*first = 512
+	for _, name := range files {
+		readFirst(name)
 	}
-	b := make([]byte, *first)
-	n, err := r.Read(b)
-	if err != nil && err != io.EOF {
-		ch <- File{err: err}
-		return
+	for _, same := range first {
+		if len(same) < 2 {
+			continue
+		}
+		sumFiles(same)
 	}
-	hash := fmt.Sprintf("%x", md5.Sum(b[:n]))
-	ch <- File{name: name, hash: hash}
 }
 
-func readDir(dir string, f *os.File, ch chan<- File) {
-repeat:
-	names, err := f.Readdirnames(64)
-	if err != nil && err != io.EOF {
-		ch <- File{err: err}
-		return
+// sumFiles groups files by md5 checksum and eventually prints if files are
+// identical.
+func sumFiles(files []string) {
+	sum := make(map[[md5.Size]byte][]string)
+	for _, name := range files {
+		b, err := ioutil.ReadFile(name)
+		if check(err, name) {
+			continue
+		}
+		s := md5.Sum(b)
+		sum[s] = append(sum[s], name)
 	}
-	for _, name := range names {
-		readFile(path.Join(dir, name), ch)
+	for _, same := range sum {
+		if len(same) < 2 {
+			continue
+		}
+		for _, name := range same {
+			fmt.Println(name)
+		}
+		fmt.Println()
 	}
-	if err == io.EOF {
-		return
-	}
-	goto repeat
 }
 
-func usage() {
-	fmt.Fprintf(os.Stderr, "usage: showdup [options] [file ...]\n")
-	fmt.Fprintf(os.Stderr, "Flags:\n")
-	flag.PrintDefaults()
-	os.Exit(2)
+func check(err error, name string) bool {
+	if err == nil {
+		return false
+	}
+	fmt.Fprintf(os.Stderr, "%s: %s: %v\n", os.Args[0], name, err)
+	return true
 }
