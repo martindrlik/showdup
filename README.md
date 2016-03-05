@@ -6,7 +6,7 @@ Command displays identical files in specified directories.
 
 Run the `showdup` binary to display identical files in the current directory:
 
-	$ $GOPATH/bin/showdup
+	$ showdup
 
 Pass arguments to specify directories:
 
