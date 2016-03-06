@@ -72,7 +72,7 @@ func readFiles(files []string) {
 		}
 		defer f.Close()
 		var b First
-		_, err = f.Read(b[:]) // b[:] is hack to better avoid in code that matters
+		_, err = f.Read(b[:])
 		if check(err, name) {
 			return
 		}
